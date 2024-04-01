@@ -17,3 +17,13 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bi
 
 
 RUN apt-get update && apt-get dist-upgrade -y && export DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get install -y git
+
+RUN pip install -y --no-cache-dir torch torchvision torchaudio
+
+RUN pip install -y --no-cache-dir accelerate transformers bitsandbytes
+
+RUN pip install -y --no-cache-dir langchain sentence-transformers pypdf
+
+RUN conda install -c pytorch -c nvidia faiss-gpu=1.8.0
