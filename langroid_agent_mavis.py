@@ -24,7 +24,7 @@ llm_1_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
 
 llm_2_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
-    chat_model=lm.OpenAIChatModel.GPT3_5_TURBO,  # or, e.g., "ollama/mistral"
+    # chat_model=lm.OpenAIChatModel.GPT3_5_TURBO,  # or, e.g., "ollama/mistral"
     # chat_model="ollama/llama3:8b-instruct-fp16",
     chat_model="ollama/command-r",
     # chat_context_length=128_000,
