@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import pickle
 import langroid as lr
 import langroid.language_models as lm
 from langroid.agent.tools import RecipientTool
@@ -11,23 +12,32 @@ from langroid.parsing.parser import ParsingConfig, PdfParsingConfig, Splitter
 from textwrap import dedent
 import glob
 import pandas as pd
+import json
 
+from langroid.mytypes import Document, DocMetaData
+
+lr.utils.logging.setup_colored_logging()
+
+
+local_llm = "ollama/command-r:35b-v0.1-q2_K"
 # set up LLM
 llm_1_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
-    # chat_model=lm.OpenAIChatModel.GPT3_5_TURBO,  # or, e.g., "ollama/mistral"
+    chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
     # chat_model="ollama/llama3:8b-instruct-fp16",
-    chat_model="ollama/command-r",
+    # chat_model=local_llm,
     # chat_context_length=128_000,
+    chat_context_length=16_000,
     # use_chat_for_completion=True,
 )
 
 llm_2_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
-    # chat_model=lm.OpenAIChatModel.GPT3_5_TURBO,  # or, e.g., "ollama/mistral"
+    chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
     # chat_model="ollama/llama3:8b-instruct-fp16",
-    chat_model="ollama/command-r",
+    # chat_model=local_llm,
     # chat_context_length=128_000,
+    chat_context_length=16_000,
     # use_chat_for_completion=True,
 )
 
@@ -39,9 +49,12 @@ vector_db = lr.vector_store.QdrantDBConfig(
 
 mavis_doc_agent_config = DocChatAgentConfig(
     llm=lr.language_models.OpenAIGPTConfig(
-        # chat_model=lr.language_models.OpenAIChatModel.GPT3_5_TURBO,
-        chat_model="ollama/command-r",
-        max_output_tokens=1024,
+        chat_model=lm.OpenAIChatModel.GPT4_TURBO,
+        # chat_model=local_llm,
+        # max_output_tokens=8192,
+        max_output_tokens=4096,
+        # chat_context_length=128_000,
+        chat_context_length=16_000,
     ),
     use_tools=True,
     use_functions_api=True,
@@ -68,9 +81,12 @@ vector_db_cmmc = lr.vector_store.QdrantDBConfig(
 
 cmmc_doc_agent_config = DocChatAgentConfig(
     llm=lr.language_models.OpenAIGPTConfig(
-        # chat_model=lr.language_models.OpenAIChatModel.GPT4_TURBO,
-        chat_model="ollama/command-r",
-        max_output_tokens=1024,
+        chat_model=lm.OpenAIChatModel.GPT4_TURBO,
+        # chat_model=local_llm,
+        # max_output_tokens=8192,
+        max_output_tokens=4096,
+        # chat_context_length=128_000,
+        chat_context_length=16_000,
     ),
     use_tools=True,
     use_functions_api=True,
@@ -121,24 +137,44 @@ SEND_TO = lr.utils.constants.SEND_TO
 cmmc_df = pd.read_csv("./cmmc.csv", quotechar="|")
 nist_sections = pd.read_csv("./nist_sections.csv", quotechar="|")
 
-
 ASSESSOR_SYSTEM = dedent(
-    f"""l
-        You are a Cyber Security Maturity Model Certification (CMMC) Assessor. You are talking with a system admin called Devin for Mavis Shop.
-        You will ask questions about the state of security practices according to CMMC.
+    f"""You are a Cyber Security Maturity Model Certification (CMMC) Assessor.
+
         You are going to assess the organizations based on the CMMC Document. However you do NOT have access to the documents.
-        You will be assisted by AssessmentDocs, who DOES have access to the documents. You can ask AssessmentDocs for Specific Sections of the assessment.
+        You will be assisted by AssessmentDocs, who DOES have access to the documents.
         The tool contains both CMMC Sections and NIST Handbook Sections. They do not contain information about Mavis Shop. Only Devin knows about Mavis Shop.
 
-        The CMMC sections' headers are: {cmmc_df["section"]}
+        The CMMC topics are are: {cmmc_df["topic"]}
 
         The NIST section headers are: {nist_sections["section_heading"]}
 
-        Both the CMMC and NIST sections are available with AssessmentDocs.
+        Both the CMMC sections for the corresponding topic and NIST sections for the CMMC sections are available with AssessmentDocs. Create questions for each of the topics in CMMC sections.
 
-        Once you have sufficient information about the specifications in the documents you can ask Devin questions based on the content of the documents.
+        Once you have created some questions for Devin, you can ask Devin questions based on the content of the documents at Mavis Shop.
+        Keep in mind that Devin does not know anything about CMMC and NIST. Devin only knows about their own organizations data so you need to ask the questions without CMMC and NIST references when sending a query to Devin.
 
-        You can use the Recipient tool to send messages to the Devin.
+        You can use the Recipient tool to send messages to the Devin. Only ask one question at a time.
+
+        The recipient tool is called like:
+
+        TOOL: recipient_message
+        ```json
+        {{
+            "request": "recipient_message",
+            "intended_recipient": "AssessmentDocs",
+            "content": "What are the CMMC requirements for 'Access Control' and 'System and Information Integrity'?"```
+        }}
+        ```
+
+        If asked to add recipient properly, you can do it like:
+
+        TOOL: recipient_message
+        ```json
+        {{
+            "request": "add_recipient",
+            "intended_recipient": "AssessmentDocs"
+        }}
+        ```
 
         You will maintain the conversation flow and ask relevant questions based on the answers of previous questions.
 
@@ -179,6 +215,28 @@ ORG_REP_SYSTEM = dedent(
         general knowledge). However you do NOT have access to the documents.
         You will be assisted by DocAgent, who DOES have access to the documents.
 
+        Example Tool Usage:
+            The recipient tool can be called with:
+            TOOL: recipient_message
+            ```json
+            {{
+                "request": "recipient_message",
+                "intended_recipient": "DocAgent",
+                "content": "What is Mavis Shop's policy on Access Control?"
+            ```
+            }}
+            ```
+
+            If asked to add recipient properly by the Recipient Tool, you can reply with:
+
+            TOOL: recipient_message
+            ```json
+            {{
+                "request": "add_recipient",
+                "intended_recipient": "DocAgent"
+            }}
+            ```
+
         Here are the rules:
         (a) when the question is complex or has multiple parts, break it into small
          parts and/or steps and send them to DocAgent
@@ -201,20 +259,28 @@ ORG_REP_SYSTEM = dedent(
         (k) When DocAgent responds without citing a SOURCE and EXTRACT(S), you should
             send your question again to DocChat, reminding it to cite the source and
             extract(s).
+        (l) If DocAgent answers questions with {NO_ANSWER} multiple times then you can assume that Mavis Shop does not perform the the security procedure asked.
 """
 )
 
 docs = glob.glob("./mavis_shop/*.pdf")
 doc_agent.ingest_doc_paths(docs)
 
-cmmc_doc_agent.ingest_doc_paths(glob.glob("./references/*.pdf"))
+cmmc_doc_agent.ingest_dataframe(
+    cmmc_df, content="text", metadata=["section", "topic", "level"]
+)
+
+cmmc_doc_agent.ingest_dataframe(
+    nist_sections, content="text", metadata=["section_heading"]
+)
+
 
 doc_task = lr.Task(
     doc_agent,
     name="DocAgent",
     interactive=False,
     single_round=True,
-    # llm_delegate=True,
+    llm_delegate=True,
     done_if_no_response=[lr.Entity.LLM],  # done if null response from LLM
     done_if_response=[lr.Entity.LLM],  # done if non-null response from LLM
     # system_message=ORG_REP_SYSTEM,
@@ -226,7 +292,7 @@ cmmc_nist_doc_task = lr.Task(
     name="AssessmentDocs",
     interactive=False,
     single_round=True,
-    # llm_delegate=True,
+    llm_delegate=True,
     done_if_no_response=[lr.Entity.LLM],  # done if null response from LLM
     done_if_response=[lr.Entity.LLM],  # done if non-null response from LLM
     # system_message=ORG_REP_SYSTEM,
@@ -253,9 +319,8 @@ cmmc_assesor_task = lr.Task(
 )
 
 # doc_agent.enable_message(RecipientTool)
-mavis_agent.enable_message(RecipientTool)
-cmmc_agent.enable_message(RecipientTool)
-
+mavis_agent.enable_message(RecipientTool.create(["DocAgent"]))
+cmmc_agent.enable_message(RecipientTool.create(["AssessmentDocs", "Devin"]))
 
 history = cmmc_agent.message_history
 print("Assessor History", history)
@@ -264,8 +329,6 @@ mavis_task.add_sub_task([doc_task])
 cmmc_assesor_task.add_sub_task([cmmc_nist_doc_task, mavis_task])
 cmmc_assesor_task.run()
 
-
 history = cmmc_agent.message_history
 
-
-print("Assessor History", history)
+pickled_str = pickle.dumps(history)
