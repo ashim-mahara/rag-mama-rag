@@ -1,0 +1,52 @@
+import requests
+from transformers import pipeline
+
+# Define the API endpoint for uploading data
+API_ENDPOINT = "https://example.com/upload_data"
+
+# Function to upload data to the API
+def upload_data_to_api(data):
+    try:
+        response = requests.post(API_ENDPOINT, json=data)
+        if response.status_code == 200:
+            print("Data uploaded successfully!")
+        else:
+            print(f"Failed to upload data. Status code: {response.status_code}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# Function to generate questions and answers using a pre-trained LLM
+def generate_questions_and_answers(context):
+    try:
+        # Load the pre-trained model
+        qa_pipeline = pipeline("question-answering")
+
+        # Generate questions and answers
+        result = qa_pipeline(context)
+        question = result["question"]
+        answer = result["answer"]
+
+        return question, answer
+    except Exception as e:
+        print(f"An error occurred while generating questions and answers: {e}")
+        return None, None
+
+# Example data to upload to the API
+example_data = {
+    "context": "The quick brown fox jumps over the lazy dog.",
+    "question": "What animal jumps over the lazy dog?",
+    "answer": "fox"
+}
+
+# Upload example data to the API
+upload_data_to_api(example_data)
+
+# Generate questions and answers for a given context
+context = "The capital of France is Paris."
+question, answer = generate_questions_and_answers(context)
+
+if question and answer:
+    print("Generated Question:", question)
+    print("Generated Answer:", answer)
+else:
+    print("Failed to generate question and answer.")
