@@ -4,6 +4,10 @@ load_dotenv()
 
 import pickle
 import langroid as lr
+from langroid.embedding_models.models import (
+    OpenAIEmbeddingsConfig,
+    SentenceTransformerEmbeddingsConfig,
+)
 import langroid.language_models as lm
 from langroid.agent.tools import RecipientTool
 from langroid.parsing import code_parser
@@ -12,49 +16,64 @@ from langroid.parsing.parser import ParsingConfig, PdfParsingConfig, Splitter
 from textwrap import dedent
 import glob
 import pandas as pd
-import json
-
-from langroid.mytypes import Document, DocMetaData
 
 lr.utils.logging.setup_colored_logging()
 
 
 local_llm = "ollama/command-r:35b-v0.1-q2_K"
+# local_llm = "cognitivecomputations/dolphin-2.9-llama3-8b"
+# local_llm = "quantized_llama3"
+api_base = "http://localhost:8000/v1/"
 # set up LLM
 llm_1_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
-    chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
+    # chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
     # chat_model="ollama/llama3:8b-instruct-fp16",
-    # chat_model=local_llm,
+    chat_model=local_llm,
+    api_base=api_base,
     # chat_context_length=128_000,
-    chat_context_length=16_000,
+    chat_context_length=8192,
     # use_chat_for_completion=True,
 )
 
 llm_2_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
-    chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
+    # chat_model=lm.OpenAIChatModel.GPT4,  # or, e.g., "ollama/mistral"
     # chat_model="ollama/llama3:8b-instruct-fp16",
-    # chat_model=local_llm,
+    chat_model=local_llm,
+    api_base=api_base,
     # chat_context_length=128_000,
-    chat_context_length=16_000,
+    chat_context_length=8192,
     # use_chat_for_completion=True,
 )
 
+# oai_embed_config = OpenAIEmbeddingsConfig(
+#     model_type="local",
+#     model_name="mxbai-embed-large",
+#     dims=1536,
+#     api_base="http://localhost:11434/api/",
+# )
+
+hf_embed_config = SentenceTransformerEmbeddingsConfig(
+    model_type="sentence-transformer",
+    model_name="BAAI/bge-large-en-v1.5",
+)
 
 vector_db = lr.vector_store.QdrantDBConfig(
     collection_name="mavis_shop",
     replace_collection=True,
+    embedding=hf_embed_config,
 )
 
 mavis_doc_agent_config = DocChatAgentConfig(
     llm=lr.language_models.OpenAIGPTConfig(
-        chat_model=lm.OpenAIChatModel.GPT4_TURBO,
-        # chat_model=local_llm,
+        # chat_model=lm.OpenAIChatModel.GPT4_TURBO,
+        chat_model=local_llm,
+        api_base=api_base,
         # max_output_tokens=8192,
-        max_output_tokens=4096,
+        max_output_tokens=2048,
         # chat_context_length=128_000,
-        chat_context_length=16_000,
+        chat_context_length=8192,
     ),
     use_tools=True,
     use_functions_api=True,
@@ -63,7 +82,7 @@ mavis_doc_agent_config = DocChatAgentConfig(
     parsing=lr.parsing.parser.ParsingConfig(
         separators=["\n\n"],
         splitter=lr.parsing.parser.Splitter.PARA_SENTENCE,
-        n_similar_docs=10,
+        n_similar_docs=2,
         pdf=PdfParsingConfig(
             # alternatives: "unstructured", "pdfplumber", "fitz"
             library="pdfplumber",
@@ -77,16 +96,18 @@ doc_agent = DocChatAgent(mavis_doc_agent_config)
 vector_db_cmmc = lr.vector_store.QdrantDBConfig(
     collection_name="cmmc_assessment",
     replace_collection=True,
+    embedding=hf_embed_config,
 )
 
 cmmc_doc_agent_config = DocChatAgentConfig(
     llm=lr.language_models.OpenAIGPTConfig(
-        chat_model=lm.OpenAIChatModel.GPT4_TURBO,
-        # chat_model=local_llm,
+        # chat_model=lm.OpenAIChatModel.GPT4_TURBO,
+        chat_model=local_llm,
+        api_base=api_base,
         # max_output_tokens=8192,
-        max_output_tokens=4096,
+        max_output_tokens=2048,
         # chat_context_length=128_000,
-        chat_context_length=16_000,
+        chat_context_length=8192,
     ),
     use_tools=True,
     use_functions_api=True,
@@ -95,7 +116,7 @@ cmmc_doc_agent_config = DocChatAgentConfig(
     parsing=lr.parsing.parser.ParsingConfig(
         separators=["\n\n"],
         splitter=lr.parsing.parser.Splitter.PARA_SENTENCE,
-        n_similar_docs=10,
+        n_similar_docs=2,
         pdf=PdfParsingConfig(
             # alternatives: "unstructured", "pdfplumber", "fitz"
             library="pdfplumber",
@@ -185,13 +206,13 @@ ASSESSOR_SYSTEM = dedent(
         (a) when the question is complex or has multiple parts, break it into small
          parts and/or steps and send them to AssessmentDocs
         (b) if AssessmentDocs says {NO_ANSWER} or gives no answer, try asking in other ways.
-        (c) Once you collect all parts of the answer, say "DONE"
+        (c) Once you collect all parts of the answer, say {DONE}
             and show me the consolidated final answer.
         (d) AssessmentDocs has no memory of previous dialog, so you must ensure your
             questions are stand-alone questions that don't refer to entities mentioned
             earlier in the dialog.
         (e) if AssessmentDocs is unable to answer after your best efforts, you can say
-            {NO_ANSWER} and move on to the next question.
+            {NO_ANSWER} and {DONE} and move on to the next question.
         (f) answers should be based ONLY on the documents, NOT on your prior knowledge.
         (g) be direct and concise, do not waste words being polite.
         (h) if you need more info from the user, before asking AssessmentDocs, you should
@@ -304,6 +325,7 @@ mavis_task = lr.Task(
     name="Devin",
     llm_delegate=True,
     single_round=False,
+    # done_if_response=[lr.Entity.LLM],
     done_if_no_response=[lr.Entity.LLM],  # done if null response from LLM
     system_message=ORG_REP_SYSTEM,
 )
