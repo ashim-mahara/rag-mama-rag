@@ -21,9 +21,12 @@ lr.utils.logging.setup_colored_logging()
 
 
 local_llm = "ollama/command-r:35b-v0.1-q2_K"
+# local_llm = "ollama/command-r"
+# local_llm = "ollama/llama3.1:8b"
 # local_llm = "cognitivecomputations/dolphin-2.9-llama3-8b"
 # local_llm = "quantized_llama3"
-api_base = "http://localhost:8000/v1/"
+# api_base = "http://localhost:8000/v1/"
+api_base="http://localhost:11434/v1/"
 # set up LLM
 llm_1_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     # any model served via an OpenAI-compatible API
@@ -33,7 +36,7 @@ llm_1_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     api_base=api_base,
     # chat_context_length=128_000,
     chat_context_length=8192,
-    # use_chat_for_completion=True,
+    use_chat_for_completion=False,
 )
 
 llm_2_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
@@ -44,15 +47,8 @@ llm_2_cfg = lm.OpenAIGPTConfig(  # or OpenAIAssistant to use Assistant API
     api_base=api_base,
     # chat_context_length=128_000,
     chat_context_length=8192,
-    # use_chat_for_completion=True,
+    use_chat_for_completion=False,
 )
-
-# oai_embed_config = OpenAIEmbeddingsConfig(
-#     model_type="local",
-#     model_name="mxbai-embed-large",
-#     dims=1536,
-#     api_base="http://localhost:11434/api/",
-# )
 
 hf_embed_config = SentenceTransformerEmbeddingsConfig(
     model_type="sentence-transformer",
@@ -61,7 +57,7 @@ hf_embed_config = SentenceTransformerEmbeddingsConfig(
 
 vector_db = lr.vector_store.QdrantDBConfig(
     collection_name="mavis_shop",
-    replace_collection=True,
+    replace_collection=False,
     embedding=hf_embed_config,
 )
 
@@ -95,7 +91,7 @@ doc_agent = DocChatAgent(mavis_doc_agent_config)
 
 vector_db_cmmc = lr.vector_store.QdrantDBConfig(
     collection_name="cmmc_assessment",
-    replace_collection=True,
+    replace_collection=False,
     embedding=hf_embed_config,
 )
 
@@ -116,7 +112,7 @@ cmmc_doc_agent_config = DocChatAgentConfig(
     parsing=lr.parsing.parser.ParsingConfig(
         separators=["\n\n"],
         splitter=lr.parsing.parser.Splitter.PARA_SENTENCE,
-        n_similar_docs=2,
+        n_similar_docs=10,
         pdf=PdfParsingConfig(
             # alternatives: "unstructured", "pdfplumber", "fitz"
             library="pdfplumber",
@@ -237,7 +233,8 @@ ORG_REP_SYSTEM = dedent(
         You will be assisted by DocAgent, who DOES have access to the documents.
 
         Example Tool Usage:
-            The recipient tool can be called with:
+            The recipient tool can be called like:
+
             TOOL: recipient_message
             ```json
             {{
@@ -248,7 +245,7 @@ ORG_REP_SYSTEM = dedent(
             }}
             ```
 
-            If asked to add recipient properly by the Recipient Tool, you can reply with:
+            If asked to add recipient properly by the Recipient Tool, you can reply like:
 
             TOOL: recipient_message
             ```json
@@ -344,13 +341,11 @@ cmmc_assesor_task = lr.Task(
 mavis_agent.enable_message(RecipientTool.create(["DocAgent"]))
 cmmc_agent.enable_message(RecipientTool.create(["AssessmentDocs", "Devin"]))
 
-history = cmmc_agent.message_history
-print("Assessor History", history)
-
 mavis_task.add_sub_task([doc_task])
 cmmc_assesor_task.add_sub_task([cmmc_nist_doc_task, mavis_task])
 cmmc_assesor_task.run()
 
 history = cmmc_agent.message_history
+# print("Assessor History", history)
 
 pickled_str = pickle.dumps(history)
